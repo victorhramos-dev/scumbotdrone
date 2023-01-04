@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Scum BOT</title>
+    <link type="text/css" rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css" />
+    <link type="text/css" rel="stylesheet" href="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.min.css" />
+    <!-- Include eel.js - note this file doesn't exist in the 'web' directory -->
+    <script type="text/javascript" src="/eel.js"></script>
+
+    <!-- Load polyfills to support older browsers -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es2015%2CIntersectionObserver"
+        crossorigin="anonymous"></script>
+    <!-- Load Vue followed by BootstrapVue -->
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.7.14/dist/vue.js"></script>
+    <script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue.min.js"></script>
+
+    <!-- Load the following for BootstrapVueIcons support -->
+    <script src="https://unpkg.com/bootstrap-vue@latest/dist/bootstrap-vue-icons.min.js"></script>
+
+    <link rel="stylesheet" href="main.css">
+</head>
+
+<body>
+    <div id="app" :class="{'loggedout': !drone.auth,'loggedin': drone.auth}">
+        <div id="title-bar">
+            <div id="title" v-if="drone.auth">{{ window.title }}</div>
+            <div id="title-bar-btns">
+                <button id="close-btn" @click="close()">x</button>
+            </div>
+        </div>
+
+        <template v-if="!drone.auth">
+            <div id="login-form">
+                <b-container fluid>
+                    <b-form-group label="Token">
+                        <b-input v-model="drone.steamid"></b-input>
+                    </b-form-group>
+                    <b-form-group class="mt-2 hidden" label="HWID">
+                        <b-input readonly v-model="drone.hwid"></b-input>
+                    </b-form-group>
+
+                    <b-btn variant="primary w-100 mt-2" @click="authorize()">Authorize</b-btn>
+                </b-container>
+            </div>
+        </template>
+        <template v-else>
+            <b-container fluid>
+                <div id="drone-avatar">
+                    <b-avatar src="https://www.pngmart.com/files/5/Robot-PNG-HD.png" class="mr-1"></b-avatar>
+                    {{ drone.name }} <small>127.0.0.1</small>
+                </div>
+
+                <b-row>
+                    <b-col cols="12">
+                        <b-alert show variant="success"><b-icon icon="cloud-check-fill"></b-icon><b>{{ this.api.domain
+                                }}</b> connected.</b-alert>
+                    </b-col>
+                    <b-col cols="6">
+                        <b-form-group label="Game">
+                            <b-button variant="primary" class="w-100" @click="openGame()" v-if="!game.state">Open
+                                Game</b-button>
+                            <b-button variant="success" class="w-100" disabled v-if="game.state">Game ready!</b-button>
+                        </b-form-group>
+                    </b-col>
+                    <b-col cols="6">
+                        <b-form-group label="Server">
+                            <b-button variant="danger" class="w-100" disabled v-if="!drone.logged && !game.state">Player
+                                offline</b-button>
+                            <b-button variant="primary" class="w-100" v-if="!drone.logged && game.state"
+                                @click="connectToGame()">Connect</b-button>
+                            <b-button variant="success" class="w-100" disabled v-if="drone.logged">Player
+                                online!</b-button>
+                        </b-form-group>
+                    </b-col>
+                    <b-col cols="12">
+                        <b-form-group label="Bot Status">
+                            <b-form-select v-model="drone.paused" class="form-control">
+                                <b-form-select-option :value="true" v-if="!drone.logged">Paused
+                                    (forced)</b-form-select-option>
+                                <b-form-select-option :value="true" v-if="drone.logged">Paused</b-form-select-option>
+                                <b-form-select-option :value="false">Running</b-form-select-option>
+                            </b-form-select>
+                        </b-form-group>
+                    </b-col>
+                </b-row>
+
+                <b-row>
+                    <b-col>
+                        <b-form-group label="Log">
+                            <b-textarea v-model="drone.log" rows="12" readonly disabled></b-textarea>
+                        </b-form-group>
+                    </b-col>
+                </b-row>
+            </b-container>
+        </template>
+
+    </div>
+
+    <script>
+        const app = new Vue({
+            el: "#app",
+            data() {
+                return {
+                    window: {
+                        title: null,
+                    },
+                    game: {
+                        state: false,
+                        coords: null,
+                    },
+                    drone: {
+                        paused: true,
+                        name: null,
+                        auth: true,
+                        hwid: null,
+                        steamid: null,
+                        log: null,
+                    },
+                    timers: {
+                        runtime: null,
+                    },
+                    server: {
+                        ip: '172.107.197.98',
+                        port: '29202',
+                    },
+                    api: {
+                        domain: null,
+                        token: null,
+                        url: null,
+                    }
+                }
+            },
+            async created() {
+                this.drone.hwid = await eel.get_hwid()();
+                this.api.url = await eel.get_api_url()();
+                this.api.domain = (new URL(this.api.url)).hostname;
+
+                //step1
+                this.validateAuth();
+
+                this.timers.runtime = setInterval(async () => {
+                    await this.checkRuntime()
+                }, 1000);
+            },
+            mounted() {
+                api.send('resize', 400, 264)
+            },
+            methods: {
+                async checkRuntime() {
+                    gameState = await eel.get_game_state()();
+                    if (!gameState[0] && !this.drone.paused) {
+                        this.drone.paused = true;
+                    }
+
+                    if (gameState[0] != this.game.state) {
+                        this.game.state = gameState[0]
+
+                        if (gameState[0] == false) {
+                            this.addLineToLog('[Game] Game closed')
+                        } else {
+                            this.addLineToLog('[Game] Game opened')
+                        }
+                    }
+
+                    if (gameState[0]) {
+                        this.game.coords = {
+                            x0: gameState[1][0],
+                            y0: gameState[1][1],
+                            x1: gameState[1][2],
+                            y1: gameState[1][3],
+                        };
+
+                        api.send('move', this.game.coords.x1, this.game.coords.y0)
+                    }
+                },
+                close() {
+                    api.send('close');
+                },
+                authorize() {
+                    this.drone.auth = true;
+
+                    this.validateAuth();
+                },
+                validateAuth() {
+                    if (this.drone.auth == true) {
+                        this.drone.name = "Drone #1";
+                        api.send('resize', 400, 720)
+
+                        this.setTitle();
+                    }
+                },
+                setTitle() {
+                    this.window.title = this.drone.name + ' - ' + (this.drone.paused ? 'Paused' : 'Running');
+                    api.send('title', this.window.title)
+                },
+                addLineToLog(msg) {
+                    if (!this.drone.log) {
+                        this.drone.log = msg + '\n';
+                    } else {
+                        this.drone.log = msg + '\n' + this.drone.log;
+                    }
+                },
+                updateLastLine(newline) {
+                    arr = this.drone.log.split('\n');
+                    arr[0] = newline;
+
+                    this.drone.log = arr.join('\n');
+                },
+                async openGame() {
+                    this.game.state = true
+
+                    clearInterval(this.timers.runtime);
+
+                    setTimeout(async () => {
+                        await this.runcmd('sw.open_game()')
+
+                        this.timers.runtime = setInterval(async () => {
+                            await this.checkRuntime()
+                        }, 1000);
+
+                        api.send('move', this.game.coords.x1 + 10, this.game.coords.y0)
+                    }, 300)
+                },
+                async connectToGame() {
+                    focus = await this.runcmd('sw.focus_game()');
+
+                    if (focus == true) {
+                        this.queueCommands([
+                            "eel.sleep(0.1)",
+                            "pyautogui.press('esc')",
+                            "pyautogui.press('esc')",
+                            "pyautogui.keyDown('ctrl')",
+                            "eel.sleep(0.1)",
+                            "pyautogui.keyDown('d')",
+                            "eel.sleep(0.3)",
+                            "pyautogui.keyUp('d')",
+                            "eel.sleep(0.1)",
+                            "pyautogui.keyUp('ctrl')",
+                            "pyautogui.click(cvx(144), cvy(505))",
+                            "eel.sleep(0.1)",
+                            "pyautogui.click(cvx(185), cvy(635))",
+                            "pyautogui.keyDown('ctrl')",
+                            "eel.sleep(0.1)",
+                            "pyautogui.keyDown('a')",
+                            "eel.sleep(0.3)",
+                            "pyautogui.keyUp('a')",
+                            "eel.sleep(0.1)",
+                            "pyautogui.keyUp('ctrl')",
+                            "eel.sleep(0.1)",
+                            "pyautogui.press('backspace')",
+                            "pyautogui.write('" + [this.server.ip, this.server.port].join(':') + "')",
+                            "pyautogui.click(cvx(145), cvy(600))",
+                            "eel.sleep(17)",
+                            "pyautogui.click(cvx(400), cvy(445))"
+                        ]);
+                    } else {
+                        alert('Problem on focus game, try again');
+                    }
+                },
+                async test() {
+                    playerPos =  await this.playerLocation('76561198982922957');
+
+                    let x = playerPos[0]
+                    let y = playerPos[1]
+                    let z = playerPos[2]
+
+                    await this.runcmd( `drone.send_message('#SpawnItem Pan 1 Location "${x} ${y} ${z}"')`)
+                },
+                async playerLocation(steam) {
+                    await this.runcmd("drone.send_message('#location " + steam + " true')")
+                    clipboard = await eel.get_clipboard()();
+
+                    //sdfgdfgfd: X=76010.297 Y=16775.799 Z=39906.711
+                    str = clipboard.split(': ')[1]; //X=76010.297 Y=16775.799 Z=39906.711
+
+                    x = str.split(' Y=')[0]; //X=76010.297
+                    x = x.replace('X=', ''); //76010.297
+
+                    y = str.split(' Y=')[1]; //16775.799 Z=39906.711
+                    y = y.split(' Z=')[0]; //16775.799
+
+                    z = str.split('Z=')[1]; //39906.711
+
+                    return [x, y, z];
+                },
+                async handlecmd(cmd) {
+                    console.log(cmd)
+                    // remap x coord
+                    let cvx = await cmd.match((new RegExp('\\b(?<=(cvx)\\()([^),]+)[^)]*\\b', 'gm')))
+                    if (cvx) {
+                        let newx = this.game.coords.x0 + parseFloat(cvx[0])
+                        cmd = cmd.replace('cvx(' + cvx[0] + ')', newx)
+                    }
+
+                    // remap y coord
+                    let cvy = await cmd.match((new RegExp('\\b(?<=(cvy)\\()([^),]+)[^)]*\\b', 'gm')))
+                    if (cvy) {
+                        let newy = this.game.coords.y0 + parseFloat(cvy[0])
+                        cmd = cmd.replace('cvy(' + cvy[0] + ')', newy)
+                    }
+
+                    console.log(cmd)
+                    return cmd
+                },
+                async queueCommands(cmds = []) {
+                    for await (i of cmds) {
+                        await this.runcmd(i);
+                    }
+                },
+                async runcmd(cmd) {
+                    console.log(cmd)
+                    cmd = await this.handlecmd(cmd);
+
+                    console.log(cmd)
+
+                    this.addLineToLog('[Running] ' + cmd);
+                    result = await eel.command(cmd)();
+                    this.updateLastLine('[Complete] ' + cmd);
+                    console.log(result);
+                    return result;
+                }
+            }
+        })
+    </script>
+</body>
+
+</html>
